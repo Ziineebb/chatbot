@@ -8,7 +8,7 @@ openai.api_key = "key"
 # Configuration de la connexion MySQL
 db_config = {
     'user': 'root',
-    'password': 'mdps',  #entrer le mdps
+    'password': 'mdps',  # Entrer le mot de passe
     'host': 'localhost',
     'database': 'telecom_assistant',
 }
@@ -16,7 +16,6 @@ db_config = {
 # Connexion à la base de données MySQL
 conn = mysql.connector.connect(**db_config)
 cursor = conn.cursor()
-
 
 # Fonction pour insérer les offres si elles n'existent pas
 def insert_offers():
@@ -30,8 +29,7 @@ def insert_offers():
     cursor.executemany('INSERT IGNORE INTO offers (name, description, price) VALUES (%s, %s, %s)', offers_data)
     conn.commit()
 
-
-#fonction pour récupérer les messages commencant par qst
+# Fonction pour récupérer les messages commencant par qst
 def getquestion():
     query = '''
                 SELECT DISTINCT content
@@ -44,18 +42,15 @@ def getquestion():
     simple_list = [item[0] for item in data]
     return simple_list
 
-
 # Fonction pour récupérer les détails des offres depuis la base de données
 def get_offer_details():
     cursor.execute('SELECT name, description, price FROM offers')
     return cursor.fetchall()
 
-
 # Fonction pour insérer un message dans la base de données
 def log_to_db(role, content):
     cursor.execute('INSERT INTO messages (role, content) VALUES (%s, %s)', (role, content))
     conn.commit()
-
 
 # Fonction de requête OpenAI
 def Chat(user_messages) -> str:
@@ -65,16 +60,31 @@ def Chat(user_messages) -> str:
     )
     return response.choices[0].message['content']
 
+# Liste pour stocker l'historique des messages
+message_history = []
 
 # Fonction pour démarrer le chat
 def startChat(user_message):
     insert_offers()  # Initialiser les offres dans la base de données
-    Topic = "offres de Maroc Telecom"
-    all_messages = [{"role": "system",
-                     "content": "Vous êtes un assistant de Maroc Telecom, vous pouvez uniquement répondre aux questions relatives aux offres de Maroc Telecom"}]
-
-    # Commande pour obtenir les détails des offres
-    if any(word in user_message for word in ["tarifs", "détails", "offres","offre","tarif"]):
+    
+    global message_history
+    
+    # Ajouter le message utilisateur à l'historique
+    message_history.append({"role": "user", "content": user_message})
+    
+    # Limiter l'historique aux 10 derniers messages
+    if len(message_history) > 10:
+        message_history = message_history[-10:]
+    
+    # Ajouter un message système au début si l'historique est vide
+    if len(message_history) == 1:
+        message_history.insert(0, {
+            "role": "system", 
+            "content": "Vous êtes un assistant de Maroc Telecom, vous pouvez uniquement répondre aux questions relatives aux offres de Maroc Telecom."
+        })
+    
+    # Vérifier les mots-clés pour les offres et insérer les détails si nécessaire
+    if any(word in user_message.lower() for word in ["tarifs", "détails", "offres", "offre", "tarif"]):
         offers = get_offer_details()
         if offers:
             response = "Voici les détails des offres de Maroc Telecom :\n" + "\n".join(
@@ -83,29 +93,29 @@ def startChat(user_message):
             )
         else:
             response = "Je n'ai pas d'informations sur les offres pour le moment."
-
+        
+        # Enregistrer la réponse dans l'historique
+        message_history.append({"role": "assistant", "content": response})
+        
+        # Limiter l'historique aux 10 derniers messages
+        if len(message_history) > 10:
+            message_history = message_history[-10:]
+        
         log_to_db('user', user_message)
         log_to_db('assistant', response)
         return response
 
-    if user_message == "exit":
-        print("Bot : Au revoir !")
-        return
-
-    if user_message == "topic":
-        print("Bot : Quel est le nouveau sujet sur lequel vous voulez discuter ?")
-        Topic = input("Utilisateur : ").strip()
-        os.system('cls' if os.name == 'nt' else 'clear')
-        all_messages = [{"role": "system",
-                         "content": f"Vous êtes un assistant pour les offres de Maroc Telecom, vous pouvez uniquement répondre aux questions relatives aux offres de Maroc Telecom"}]
-
-        return
-
-    all_messages.append({"role": "user", "content": user_message})
-    result = Chat(all_messages)
-    all_messages.append({"role": "assistant", "content": result})
-
+    # Générer la réponse avec l'API OpenAI en utilisant l'historique
+    result = Chat(message_history)
+    
+    # Ajouter la réponse du chatbot à l'historique
+    message_history.append({"role": "assistant", "content": result})
+    
+    # Limiter l'historique aux 10 derniers messages
+    if len(message_history) > 10:
+        message_history = message_history[-10:]
+    
     log_to_db('user', user_message)
     log_to_db('assistant', result)
-
+    
     return result
